@@ -1,8 +1,4 @@
-// ============================================================
-// ⚠️ ใส่ URL ของ Google Apps Script Web App ที่นี่
-// วิธีได้ URL: Deploy > New deployment > Web app > copy URL
-// ============================================================
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwCBR4GAUHIiEMRR6OkEz2pSQGn25KYwHp7_EW2itQkpcwHW20k0_kMmDdOlPNY6sTV2A/exec';
+import { supabase } from '../lib/supabaseClient';
 
 const CACHE_KEY = 'energy_checklist_cache';
 const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
@@ -32,27 +28,109 @@ function setCachedData(key, data) {
 }
 
 export function clearCache() {
-  localStorage.removeItem(CACHE_KEY);
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(CACHE_KEY)) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    // ignore
+  }
 }
 
-// ===== GET ALL DATA (combined, single API call) =====
+// ===== GET ALL DATA (combined view) =====
 export async function getAllData(date) {
-  if (!SCRIPT_URL) {
+  if (!isConfigured()) {
     return { success: true, status: {}, records: [], scores: [] };
   }
 
-  // Check cache first
   const cacheKey = `${CACHE_KEY}_${date}`;
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
 
   try {
-    const url = `${SCRIPT_URL}?action=getAllData&date=${encodeURIComponent(date)}`;
-    const response = await fetch(url);
-    const result = await response.json();
-    if (result.success) {
-      setCachedData(cacheKey, result);
+    // 1. Fetch all records from Supabase
+    const { data: dbRecords, error } = await supabase
+      .from('records')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    // 2. Process records
+    const status = {};
+    const records = [];
+    const scoreMap = {}; // { "buildingName": { b, totalScore, totalChecks, totalPassed } }
+
+    for (const row of dbRecords || []) {
+      const rowDate = row.date;
+
+      // Map Supabase column names to React UI expectation
+      const mappedRecord = {
+        date: row.date,
+        day: row.day_name,
+        inspector: row.inspector,
+        buildingId: row.building_id,
+        buildingName: row.building_name,
+        building: row.building_name, 
+        roomId: row.room_id,
+        roomName: row.room_name,
+        room: row.room_name,
+        lights: row.lights,
+        computer: row.computer,
+        aircon: row.aircon,
+        fan: row.fan,
+        status: row.status,
+        score: row.score,
+        timestamp: row.created_at,
+      };
+      records.push(mappedRecord);
+
+      // Status for today (must match requested 'date')
+      if (rowDate === date) {
+        // Dashboard.jsx expects the key to be buildingName|roomName
+        const key = `${row.building_name}|${row.room_name}`;
+        status[key] = {
+          inspector: row.inspector,
+          lights: row.lights,
+          computer: row.computer,
+          aircon: row.aircon,
+          fan: row.fan,
+          allPassed: row.status === 'ผ่านครบ',
+          score: row.score,
+        };
+      }
+
+      // Aggregate Scores by Building and Room
+      const skey = `${row.building_name}|${row.room_name}`;
+      if (!scoreMap[skey]) {
+        scoreMap[skey] = {
+          building: row.building_name,
+          room: row.room_name,
+          totalScore: 0,
+          totalChecks: 0,
+          totalPassed: 0,
+        };
+      }
+      scoreMap[skey].totalScore += row.score;
+      scoreMap[skey].totalChecks += 1;
+      if (row.status === 'ผ่านครบ') scoreMap[skey].totalPassed += 1;
     }
+
+    const scores = Object.values(scoreMap).sort((a, b) => b.totalScore - a.totalScore);
+
+    const result = {
+      success: true,
+      status,
+      records: records.reverse(), // latest first for table
+      scores,
+    };
+
+    setCachedData(cacheKey, result);
     return result;
   } catch (error) {
     console.error('getAllData error:', error);
@@ -62,27 +140,52 @@ export async function getAllData(date) {
 
 // ===== SUBMIT CHECKLIST =====
 export async function submitChecklist(data) {
-  if (!SCRIPT_URL) {
-    throw new Error('กรุณาตั้งค่า Google Apps Script URL ก่อนใช้งาน (ดูไฟล์ src/data/api.js)');
+  if (!isConfigured()) {
+    throw new Error('Supabase Configuration is missing in .env');
   }
 
   try {
-    // Clear cache so Dashboard refreshes after submit
     clearCache();
 
-    const response = await fetch(SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({
-        action: 'submit',
-        ...data,
-      }),
-    });
-    const result = await response.json();
-    if (!result.success) {
-      throw new Error(result.error || 'เกิดข้อผิดพลาดในการบันทึก');
+    const roomData = data.items[0];
+
+    // Calculate score and status manually (formerly done by GAS backend)
+    let score = 0;
+    if (roomData.lights) score++;
+    if (roomData.computer) score++;
+    if (roomData.aircon) score++;
+    if (roomData.fan) score++;
+    const status = score === 4 ? 'ผ่านครบ' : 'เปิดทิ้งไว้';
+
+    const newRecord = {
+      date: data.date,
+      day_name: data.dayName,
+      inspector: data.inspector,
+      building_id: data.buildingId,
+      building_name: data.buildingName,
+      room_id: roomData.roomId,
+      room_name: roomData.roomName,
+      lights: roomData.lights,
+      computer: roomData.computer,
+      aircon: roomData.aircon,
+      fan: roomData.fan,
+      score: score,
+      status: status,
+    };
+
+    // Upsert or Insert. We use upsert on (date, building_id, room_id)
+    const { data: resultData, error } = await supabase
+      .from('records')
+      .upsert(newRecord, {
+        onConflict: 'date,building_id,room_id'
+      })
+      .select();
+
+    if (error) {
+      throw new Error(error.message);
     }
-    return result;
+
+    return { success: true };
   } catch (error) {
     console.error('Submit error:', error);
     throw error;
@@ -90,58 +193,19 @@ export async function submitChecklist(data) {
 }
 
 // ===== GET RECORDS =====
-export async function getRecords(date = '') {
-  if (!SCRIPT_URL) {
-    return { success: true, records: [] };
-  }
-
-  try {
-    const url = `${SCRIPT_URL}?action=getRecords&date=${encodeURIComponent(date)}`;
-    const response = await fetch(url);
-    const result = await response.json();
-    return result;
-  } catch (error) {
-    console.error('Get records error:', error);
-    return { success: true, records: [] };
-  }
-}
-
-// ===== GET SCORES =====
-export async function getScores() {
-  if (!SCRIPT_URL) {
-    return { success: true, scores: [] };
-  }
-
-  try {
-    const url = `${SCRIPT_URL}?action=getScores`;
-    const response = await fetch(url);
-    const result = await response.json();
-    return result;
-  } catch (error) {
-    console.error('Get scores error:', error);
-    return { success: true, scores: [] };
-  }
-}
-
-// ===== GET TODAY STATUS =====
-export async function getTodayStatus(date) {
-  if (!SCRIPT_URL) {
-    return { success: true, status: {} };
-  }
-
-  try {
-    const url = `${SCRIPT_URL}?action=getTodayStatus&date=${encodeURIComponent(date)}`;
-    const response = await fetch(url);
-    const result = await response.json();
-    return result;
-  } catch (error) {
-    console.error('Get today status error:', error);
-    return { success: true, status: {} };
-  }
+// Used by ChecklistForm to pre-fill buttons for already submitted rooms
+export async function getRecords(date) {
+  const allData = await getAllData(date);
+  return {
+    success: allData.success,
+    records: allData.records || []
+  };
 }
 
 // ===== CHECK IF CONFIGURED =====
 export function isConfigured() {
-  return SCRIPT_URL !== '';
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  return url && url.length > 5 && key && key.length > 5;
 }
 
