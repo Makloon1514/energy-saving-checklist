@@ -50,8 +50,7 @@ git commit -m "Energy Saving Checklist App"
 
 ```bash
 git remote add origin https://github.com/YOUR_USERNAME/energy-saving-checklist.git
-git branch -M main
-git push -u origin main
+
 ```
 
 ## Step 4: Deploy on Render
