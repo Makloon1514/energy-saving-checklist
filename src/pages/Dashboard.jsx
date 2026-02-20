@@ -46,10 +46,12 @@ export default function Dashboard() {
 
   // Stats
   const totalRooms = BUILDINGS.reduce((sum, b) => sum + b.rooms.length, 0);
-  const checkedRooms = Object.values(todayStatusData).filter((s) => s.allPassed).length;
-  const partialRooms = Object.values(todayStatusData).filter((s) => !s.allPassed).length;
+  const checkedEntries = Object.values(todayStatusData);
+  const checkedRooms = checkedEntries.filter((s) => s.allPassed).length;
+  const partialRooms = checkedEntries.filter((s) => !s.allPassed).length;
   const uncheckedRooms = totalRooms - checkedRooms - partialRooms;
-  const completionPercent = totalRooms > 0 ? Math.round((checkedRooms / totalRooms) * 100) : 0;
+  const checkedCount = checkedRooms + partialRooms;
+  const completionPercent = totalRooms > 0 ? Math.round((checkedCount / totalRooms) * 100) : 0;
 
   // Filtered records for sheet view
   const filteredRecords = useMemo(() => {
@@ -243,8 +245,8 @@ export default function Dashboard() {
                 </div>
                 <div className="mt-4 bg-white/70 rounded-xl p-3 border border-blue-100">
                   <p className="text-xs text-gray-600 leading-relaxed">
-                    💡 <strong>คะแนนสะสม</strong> — ปิดครบ 4 รายการ = +1 คะแนน/ห้อง
-                    สิ้นปีมีรางวัลมีแน่! ประกาศผลวันสิ้นปี 2569
+                    💡 <strong>คะแนนสะสม</strong> — แต่ละรายการ = 1 คะแนน (ปิดไฟ / ปิดคอม / ปิดแอร์ / ปิดพัดลม)
+                    สูงสุด 4 คะแนน/ห้อง/วัน ประกาศผลวันสิ้นปี 2569
                   </p>
                 </div>
               </div>
@@ -457,8 +459,10 @@ export default function Dashboard() {
                             <td className="text-center px-3 py-2.5">
                               <span
                                 className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                                  r.status === 'ผ่าน'
+                                  r.status === 'ผ่านครบ'
                                     ? 'bg-green-100 text-green-700'
+                                    : String(r.status).includes('ผ่าน')
+                                    ? 'bg-yellow-100 text-yellow-700'
                                     : 'bg-red-100 text-red-600'
                                 }`}
                               >

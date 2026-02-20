@@ -1,66 +1,102 @@
 /**
  * Google Apps Script — Energy Saving Checklist API
- * 
+ *
  * วิธีติดตั้ง:
  * 1. สร้าง Google Sheet ใหม่
- * 2. ตั้งชื่อ Sheet แรกว่า "Records" และ Sheet ที่ 2 ว่า "Scores"
- * 3. ไปที่ Extensions > Apps Script
- * 4. วาง code นี้ทั้งหมดลงไป
- * 5. Deploy > New deployment > Web app
+ * 2. ไปที่ Extensions > Apps Script
+ * 3. วาง code นี้ทั้งหมดลงไป
+ * 4. Deploy > New deployment > Web app
  *    - Execute as: Me
  *    - Who has access: Anyone
- * 6. Copy URL ไปใส่ในไฟล์ src/data/api.js (ตัวแปร SCRIPT_URL)
- * 
- * Sheet "Records" หัวตาราง (row 1):
- * วันที่ | วัน | ผู้ตรวจ | อาคาร | ห้อง | ปิดไฟ | ปิดคอม | ปิดแอร์ | ปิดพัดลม | สถานะ | คะแนน | Timestamp
- * 
- * Sheet "Scores" หัวตาราง (row 1):
- * อาคาร | ห้อง | คะแนนรวม | จำนวนวันตรวจ | จำนวนวันผ่านครบ
- * 
- * === คะแนน: แต่ละรายการ = 1 คะแนน (สูงสุด 4 คะแนน/ห้อง/วัน) ===
- * ปิดไฟ = 1, ปิดคอม = 1, ปิดแอร์ = 1, ปิดพัดลม = 1
+ * 5. Copy URL ไปใส่ในไฟล์ src/data/api.js
+ *
+ * คะแนน: แต่ละรายการ = 1 คะแนน (สูงสุด 4/ห้อง/วัน)
+ * ปิดไฟ=1, ปิดคอม=1, ปิดแอร์=1, ปิดพัดลม=1
  */
 
-// ===== SETUP: Run this function ONCE to create headers =====
-function setupSheets() {
+var RECORD_HEADERS = [
+  "วันที่",
+  "วัน",
+  "ผู้ตรวจ",
+  "อาคาร",
+  "ห้อง",
+  "ปิดไฟ",
+  "ปิดคอม",
+  "ปิดแอร์",
+  "ปิดพัดลม",
+  "สถานะ",
+  "คะแนน",
+  "Timestamp",
+];
+var SCORE_HEADERS = [
+  "อาคาร",
+  "ห้อง",
+  "คะแนนรวม",
+  "จำนวนวันตรวจ",
+  "จำนวนวันผ่านครบ",
+];
+
+// ===== AUTO-ENSURE HEADERS =====
+function ensureHeaders() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  // Records sheet
+
   var records = ss.getSheetByName("Records");
   if (!records) {
     records = ss.insertSheet("Records");
   }
-  records.getRange(1, 1, 1, 12).setValues([[
-    "วันที่", "วัน", "ผู้ตรวจ", "อาคาร", "ห้อง",
-    "ปิดไฟ", "ปิดคอม", "ปิดแอร์", "ปิดพัดลม",
-    "สถานะ", "คะแนน", "Timestamp"
-  ]]);
-  records.getRange(1, 1, 1, 12).setFontWeight("bold");
-  records.setFrozenRows(1);
-  
-  // Scores sheet
+  // Check if row 1 has headers
+  var firstCell = records.getRange(1, 1).getValue();
+  if (firstCell !== "วันที่") {
+    // If data exists in row 1, insert a row above
+    if (firstCell !== "") {
+      records.insertRowBefore(1);
+    }
+    records
+      .getRange(1, 1, 1, RECORD_HEADERS.length)
+      .setValues([RECORD_HEADERS]);
+    records.getRange(1, 1, 1, RECORD_HEADERS.length).setFontWeight("bold");
+    records.setFrozenRows(1);
+  }
+
   var scores = ss.getSheetByName("Scores");
   if (!scores) {
     scores = ss.insertSheet("Scores");
   }
-  scores.getRange(1, 1, 1, 5).setValues([[
-    "อาคาร", "ห้อง", "คะแนนรวม", "จำนวนวันตรวจ", "จำนวนวันผ่านครบ"
-  ]]);
-  scores.getRange(1, 1, 1, 5).setFontWeight("bold");
-  scores.setFrozenRows(1);
+  var firstScoreCell = scores.getRange(1, 1).getValue();
+  if (firstScoreCell !== "อาคาร") {
+    if (firstScoreCell !== "") {
+      scores.insertRowBefore(1);
+    }
+    scores.getRange(1, 1, 1, SCORE_HEADERS.length).setValues([SCORE_HEADERS]);
+    scores.getRange(1, 1, 1, SCORE_HEADERS.length).setFontWeight("bold");
+    scores.setFrozenRows(1);
+  }
+}
+
+// ===== SETUP: Run manually to reset headers =====
+function setupSheets() {
+  ensureHeaders();
+  SpreadsheetApp.getUi().alert("✅ สร้างหัวตารางเรียบร้อย!");
+}
+
+// Date normalization to handle "2026 02 20" vs "2026-02-20"
+function normalizeDate(d) {
+  if (!d) return "";
+  return String(d).replace(/\s+/g, "-").replace(/\//g, "-");
 }
 
 // ===== WEB APP ENDPOINTS =====
 
 function doPost(e) {
   try {
+    ensureHeaders();
     var data = JSON.parse(e.postData.contents);
     var action = data.action;
-    
+
     if (action === "submit") {
       return submitChecklist(data);
     }
-    
+
     return jsonResponse({ success: false, error: "Unknown action" });
   } catch (err) {
     return jsonResponse({ success: false, error: err.toString() });
@@ -69,8 +105,9 @@ function doPost(e) {
 
 function doGet(e) {
   try {
+    ensureHeaders();
     var action = e.parameter.action;
-    
+
     if (action === "getRecords") {
       return getRecords(e.parameter.date || "");
     } else if (action === "getScores") {
@@ -78,7 +115,7 @@ function doGet(e) {
     } else if (action === "getTodayStatus") {
       return getTodayStatus(e.parameter.date || "");
     }
-    
+
     return jsonResponse({ success: false, error: "Unknown action" });
   } catch (err) {
     return jsonResponse({ success: false, error: err.toString() });
@@ -86,32 +123,39 @@ function doGet(e) {
 }
 
 // ===== SUBMIT CHECKLIST =====
-// คะแนน: ปิดไฟ=1, ปิดคอม=1, ปิดแอร์=1, ปิดพัดลม=1 (สูงสุด 4/ห้อง/วัน)
 function submitChecklist(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Records");
-  
+
   var items = data.items;
   var results = [];
-  
+  var dateStr = normalizeDate(data.date);
+
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    
-    // นับคะแนนทีละรายการ
+
     var score = 0;
     if (item.lights) score++;
     if (item.computer) score++;
     if (item.aircon) score++;
     if (item.fan) score++;
-    
-    var allChecked = (score === 4);
-    var status = allChecked ? "ผ่านครบ" : score > 0 ? "ผ่าน " + score + "/4" : "ไม่ผ่าน";
-    
-    // Check if already submitted today for this room
-    var existingRow = findExistingRecord(sheet, data.date, data.buildingName, item.roomName);
-    
+
+    var allChecked = score === 4;
+    var status = allChecked
+      ? "ผ่านครบ"
+      : score > 0
+        ? "ผ่าน " + score + "/4"
+        : "ไม่ผ่าน";
+
+    var existingRow = findExistingRecord(
+      sheet,
+      dateStr,
+      data.buildingName,
+      item.roomName,
+    );
+
     var rowData = [
-      data.date,
+      dateStr,
       data.dayName,
       data.inspector,
       data.buildingName,
@@ -122,34 +166,47 @@ function submitChecklist(data) {
       item.fan ? "✓" : "✗",
       status,
       score,
-      new Date().toISOString()
+      new Date().toISOString(),
     ];
-    
-    // หาคะแนนเดิม (ถ้ามี) เพื่อลบก่อนเพิ่มใหม่
+
     var oldScore = 0;
     var oldAllChecked = false;
     if (existingRow > 0) {
       oldScore = Number(sheet.getRange(existingRow, 11).getValue()) || 0;
-      oldAllChecked = sheet.getRange(existingRow, 10).getValue() === "ผ่านครบ";
+      oldAllChecked =
+        String(sheet.getRange(existingRow, 10).getValue()) === "ผ่านครบ";
       sheet.getRange(existingRow, 1, 1, 12).setValues([rowData]);
     } else {
       sheet.appendRow(rowData);
     }
-    
-    // Update scores (ปรับจากคะแนนเดิมเป็นคะแนนใหม่)
-    updateScore(data.buildingName, item.roomName, score, allChecked, existingRow > 0, oldScore, oldAllChecked);
-    
+
+    updateScore(
+      data.buildingName,
+      item.roomName,
+      score,
+      allChecked,
+      existingRow > 0,
+      oldScore,
+      oldAllChecked,
+    );
+
     results.push({ room: item.roomName, score: score, status: status });
   }
-  
+
   return jsonResponse({ success: true, results: results });
 }
 
-// Find existing record for today
+// Find existing record — normalize dates for comparison
 function findExistingRecord(sheet, date, building, room) {
   var data = sheet.getDataRange().getValues();
+  var normDate = normalizeDate(date);
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === date && data[i][3] === building && data[i][4] === room) {
+    var rowDate = normalizeDate(data[i][0]);
+    if (
+      rowDate === normDate &&
+      data[i][3] === building &&
+      data[i][4] === room
+    ) {
       return i + 1;
     }
   }
@@ -157,11 +214,19 @@ function findExistingRecord(sheet, date, building, room) {
 }
 
 // ===== UPDATE SCORES =====
-function updateScore(buildingName, roomName, newScore, newAllChecked, isUpdate, oldScore, oldAllChecked) {
+function updateScore(
+  buildingName,
+  roomName,
+  newScore,
+  newAllChecked,
+  isUpdate,
+  oldScore,
+  oldAllChecked,
+) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Scores");
   var data = sheet.getDataRange().getValues();
-  
+
   var foundRow = -1;
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === buildingName && data[i][1] === roomName) {
@@ -169,14 +234,13 @@ function updateScore(buildingName, roomName, newScore, newAllChecked, isUpdate, 
       break;
     }
   }
-  
+
   if (foundRow > 0) {
     var currentTotalScore = Number(data[foundRow - 1][2]) || 0;
     var totalChecks = Number(data[foundRow - 1][3]) || 0;
     var totalPassed = Number(data[foundRow - 1][4]) || 0;
-    
+
     if (isUpdate) {
-      // ลบคะแนนเดิม แล้วเพิ่มคะแนนใหม่
       currentTotalScore = currentTotalScore - oldScore + newScore;
       if (oldAllChecked) totalPassed--;
       if (newAllChecked) totalPassed++;
@@ -185,19 +249,17 @@ function updateScore(buildingName, roomName, newScore, newAllChecked, isUpdate, 
       totalChecks++;
       if (newAllChecked) totalPassed++;
     }
-    
-    sheet.getRange(foundRow, 3, 1, 3).setValues([[
-      currentTotalScore,
-      totalChecks,
-      totalPassed
-    ]]);
+
+    sheet
+      .getRange(foundRow, 3, 1, 3)
+      .setValues([[currentTotalScore, totalChecks, totalPassed]]);
   } else {
     sheet.appendRow([
       buildingName,
       roomName,
       newScore,
       1,
-      newAllChecked ? 1 : 0
+      newAllChecked ? 1 : 0,
     ]);
   }
 }
@@ -207,12 +269,14 @@ function getRecords(dateFilter) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Records");
   var data = sheet.getDataRange().getValues();
-  
+  var normFilter = normalizeDate(dateFilter);
+
   var records = [];
   for (var i = 1; i < data.length; i++) {
-    if (dateFilter && data[i][0] !== dateFilter) continue;
+    var rowDate = normalizeDate(data[i][0]);
+    if (normFilter && rowDate !== normFilter) continue;
     records.push({
-      date: data[i][0],
+      date: rowDate,
       day: data[i][1],
       inspector: data[i][2],
       building: data[i][3],
@@ -223,10 +287,10 @@ function getRecords(dateFilter) {
       fan: data[i][8] === "✓",
       status: data[i][9],
       score: data[i][10],
-      timestamp: data[i][11]
+      timestamp: data[i][11],
     });
   }
-  
+
   return jsonResponse({ success: true, records: records });
 }
 
@@ -235,7 +299,7 @@ function getScores() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Scores");
   var data = sheet.getDataRange().getValues();
-  
+
   var scores = [];
   for (var i = 1; i < data.length; i++) {
     scores.push({
@@ -243,12 +307,14 @@ function getScores() {
       room: data[i][1],
       totalScore: data[i][2],
       totalChecks: data[i][3],
-      totalPassed: data[i][4]
+      totalPassed: data[i][4],
     });
   }
-  
-  scores.sort(function(a, b) { return b.totalScore - a.totalScore; });
-  
+
+  scores.sort(function (a, b) {
+    return b.totalScore - a.totalScore;
+  });
+
   return jsonResponse({ success: true, scores: scores });
 }
 
@@ -257,10 +323,12 @@ function getTodayStatus(date) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Records");
   var data = sheet.getDataRange().getValues();
-  
+  var normDate = normalizeDate(date);
+
   var status = {};
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0] !== date) continue;
+    var rowDate = normalizeDate(data[i][0]);
+    if (rowDate !== normDate) continue;
     var key = data[i][3] + "|" + data[i][4];
     status[key] = {
       inspector: data[i][2],
@@ -268,17 +336,17 @@ function getTodayStatus(date) {
       computer: data[i][6] === "✓",
       aircon: data[i][7] === "✓",
       fan: data[i][8] === "✓",
-      allPassed: data[i][9] === "ผ่านครบ",
-      score: data[i][10]
+      allPassed: String(data[i][9]) === "ผ่านครบ",
+      score: data[i][10],
     };
   }
-  
+
   return jsonResponse({ success: true, status: status });
 }
 
 // ===== HELPER =====
 function jsonResponse(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
+    ContentService.MimeType.JSON,
+  );
 }

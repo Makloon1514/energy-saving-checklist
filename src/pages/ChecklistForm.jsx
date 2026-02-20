@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   CHECKLIST_ITEMS,
   getTodayDateString,
@@ -7,7 +7,7 @@ import {
   formatDateThai,
   getThaiDayOfWeek,
 } from '../data/constants';
-import { submitChecklist, isConfigured } from '../data/api';
+import { submitChecklist, isConfigured, getRecords } from '../data/api';
 
 export default function ChecklistForm() {
   const todayStr = getTodayDateString();
@@ -20,11 +20,51 @@ export default function ChecklistForm() {
   const [submitResult, setSubmitResult] = useState(null);
   const [submitError, setSubmitError] = useState(null);
   const [savedRooms, setSavedRooms] = useState({});
+  const [loadingExisting, setLoadingExisting] = useState(false);
 
   // Get assignment for selected inspector
   const assignment = selectedInspector
     ? getInspectorAssignment(selectedInspector, todayStr)
     : null;
+
+  // Fetch existing records when inspector is selected
+  useEffect(() => {
+    if (!assignment) return;
+
+    async function loadExisting() {
+      setLoadingExisting(true);
+      try {
+        const res = await getRecords(todayStr);
+        if (res.success && res.records.length > 0) {
+          const newCheckStates = {};
+          const newSavedRooms = {};
+
+          assignment.building.rooms.forEach((room) => {
+            const record = res.records.find(
+              (r) => r.building === assignment.building.name && r.room === room.name
+            );
+            if (record) {
+              newCheckStates[room.id] = {
+                lights: record.lights,
+                computer: record.computer,
+                aircon: record.aircon,
+                fan: record.fan,
+              };
+              newSavedRooms[room.id] = true;
+            }
+          });
+
+          setCheckStates(newCheckStates);
+          setSavedRooms(newSavedRooms);
+        }
+      } catch (e) {
+        console.error('Load existing records error:', e);
+      } finally {
+        setLoadingExisting(false);
+      }
+    }
+    loadExisting();
+  }, [selectedInspector, todayStr, assignment?.building?.name]);
 
   const getRoomChecks = useCallback(
     (roomId) => {
@@ -88,54 +128,12 @@ export default function ChecklistForm() {
     }
   };
 
-  const handleSubmitAll = async () => {
-    if (!assignment) return;
-    setSubmitting(true);
-
-    const items = assignment.building.rooms.map((room) => {
-      const checks = getRoomChecks(room.id);
-      return {
-        roomId: room.id,
-        roomName: room.name,
-        lights: checks.lights || false,
-        computer: checks.computer || false,
-        aircon: checks.aircon || false,
-        fan: checks.fan || false,
-      };
-    });
-
-    const data = {
-      date: todayStr,
-      dayName: getThaiDayOfWeek(todayStr),
-      inspector: selectedInspector,
-      buildingId: assignment.building.id,
-      buildingName: assignment.building.name,
-      items,
-    };
-
-    try {
-      setSubmitError(null);
-      const result = await submitChecklist(data);
-      const newSaved = {};
-      assignment.building.rooms.forEach((r) => {
-        newSaved[r.id] = true;
-      });
-      setSavedRooms((prev) => ({ ...prev, ...newSaved }));
-      setSubmitResult({ all: true, success: true });
-      setTimeout(() => setSubmitResult(null), 2500);
-    } catch (err) {
-      setSubmitError(err.message);
-      setSubmitResult({ all: true, success: false });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleReset = () => {
     setSelectedInspector(null);
     setCheckStates({});
     setSavedRooms({});
     setSubmitResult(null);
+    setSubmitError(null);
   };
 
   // ===== WEEKEND =====
@@ -213,6 +211,14 @@ export default function ChecklistForm() {
           <p className="text-xs text-red-700">❌ {submitError}</p>
         </div>
       )}
+
+      {/* Loading Existing */}
+      {loadingExisting && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4">
+          <p className="text-xs text-blue-700">⏳ กำลังโหลดข้อมูลที่บันทึกไว้...</p>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 mb-4">
         <div className="flex items-center justify-between mb-3">
@@ -248,12 +254,11 @@ export default function ChecklistForm() {
         </div>
       </div>
 
-      {/* Room Cards */}
+      {/* Room Cards — one room at a time */}
       {assignment.building.rooms.map((room) => {
         const checks = getRoomChecks(room.id);
         const allChecked = CHECKLIST_ITEMS.every((item) => checks[item.id]);
         const isSaved = savedRooms[room.id];
-        // คะแนนรายรายการ: 1 คะแนน/รายการ (สูงสุด 4)
         const roomScore = CHECKLIST_ITEMS.filter((item) => checks[item.id]).length;
 
         return (
@@ -312,7 +317,7 @@ export default function ChecklistForm() {
               ))}
             </div>
 
-            {/* Save Button */}
+            {/* Save Button — per room */}
             <div className="px-4 pb-4">
               <button
                 onClick={() => handleSubmitRoom(room)}
@@ -329,31 +334,14 @@ export default function ChecklistForm() {
                   ? '✅ บันทึกสำเร็จ!'
                   : submitting
                   ? '⏳ กำลังบันทึก...'
+                  : isSaved
+                  ? '🔄 อัปเดต'
                   : '💾 บันทึก'}
               </button>
             </div>
           </div>
         );
       })}
-
-      {/* Submit All */}
-      <button
-        onClick={handleSubmitAll}
-        disabled={submitting}
-        className={`w-full py-3.5 rounded-2xl text-sm font-bold shadow-lg transition-all duration-200 mt-2 ${
-          submitResult?.all && submitResult?.success
-            ? 'bg-green-500 text-white shadow-green-200'
-            : submitting
-            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-blue-200 hover:shadow-xl active:scale-[0.98]'
-        }`}
-      >
-        {submitResult?.all && submitResult?.success
-          ? '✅ บันทึกทั้งหมดสำเร็จ!'
-          : submitting
-          ? '⏳ กำลังบันทึก...'
-          : `📤 บันทึกทั้งหมด (${assignment.building.name})`}
-      </button>
     </div>
   );
 }
