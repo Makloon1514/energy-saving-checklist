@@ -4,10 +4,10 @@ export const BUILDINGS = [
     id: 'building-1',
     name: 'อาคาร 1',
     rooms: [
-      { id: '1-admin', name: 'บริหารงานทั่วไป' },
-      { id: '1-finance', name: 'การเงิน' },
-      { id: '1-eds', name: 'EDS' },
-      { id: '1-plan', name: 'แผน' },
+      { id: '1-admin', name: 'งานบริหารงานทั่วไป' },
+      { id: '1-finance', name: 'งานการเงิน' },
+      { id: '1-eds', name: 'งานEDS' },
+      { id: '1-plan', name: 'งานแผน' },
     ],
   },
   {
