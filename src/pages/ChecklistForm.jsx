@@ -93,6 +93,16 @@ export default function ChecklistForm() {
 
   const handleSubmitRoom = async (room) => {
     if (!assignment) return;
+
+    // Ask for confirmation if the room was already saved
+    const isSaved = savedRooms[room.id];
+    if (isSaved) {
+      const confirmUpdate = window.confirm(
+        `ห้อง "${room.name}" ถูกบันทึกไปแล้ว\nต้องการอัปเดตข้อมูลใหม่หรือไม่?`
+      );
+      if (!confirmUpdate) return;
+    }
+
     setSubmitting(true);
 
     const checks = getRoomChecks(room.id);

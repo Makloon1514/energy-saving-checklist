@@ -79,10 +79,30 @@ function setupSheets() {
   SpreadsheetApp.getUi().alert("✅ สร้างหัวตารางเรียบร้อย!");
 }
 
-// Date normalization to handle "2026 02 20" vs "2026-02-20"
+// Date normalization to handle Date objects, "2026 02 20", "2026-02-20", etc.
 function normalizeDate(d) {
   if (!d) return "";
-  return String(d).replace(/\s+/g, "-").replace(/\//g, "-");
+
+  // Handle JavaScript Date objects (returned by Sheets getValues())
+  if (d instanceof Date || (typeof d === "object" && d.getFullYear)) {
+    var year = d.getFullYear();
+    var month = String(d.getMonth() + 1).padStart(2, "0");
+    var day = String(d.getDate()).padStart(2, "0");
+    return year + "-" + month + "-" + day;
+  }
+
+  var str = String(d).trim();
+
+  // Handle full datetime strings like "Thu Feb 20 2026 ..."
+  // or ISO strings like "2026-02-20T04:01:50.684Z"
+  if (str.length > 10 && str.indexOf("T") > -1) {
+    str = str.split("T")[0];
+  }
+
+  // Handle various separators: spaces, slashes → dashes
+  str = str.replace(/\s+/g, "-").replace(/\//g, "-");
+
+  return str;
 }
 
 // ===== WEB APP ENDPOINTS =====
