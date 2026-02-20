@@ -128,7 +128,9 @@ function doGet(e) {
     ensureHeaders();
     var action = e.parameter.action;
 
-    if (action === "getRecords") {
+    if (action === "getAllData") {
+      return getAllData(e.parameter.date || "");
+    } else if (action === "getRecords") {
       return getRecords(e.parameter.date || "");
     } else if (action === "getScores") {
       return getScores();
@@ -362,6 +364,77 @@ function getTodayStatus(date) {
   }
 
   return jsonResponse({ success: true, status: status });
+}
+
+// ===== COMBINED ENDPOINT — single call for Dashboard =====
+function getAllData(dateFilter) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Read Records sheet once
+  var recordsSheet = ss.getSheetByName("Records");
+  var recordsData = recordsSheet.getDataRange().getValues();
+  var normFilter = normalizeDate(dateFilter);
+
+  // Build todayStatus + records in one pass
+  var status = {};
+  var records = [];
+  for (var i = 1; i < recordsData.length; i++) {
+    var rowDate = normalizeDate(recordsData[i][0]);
+
+    // Today status
+    if (rowDate === normFilter) {
+      var key = recordsData[i][3] + "|" + recordsData[i][4];
+      status[key] = {
+        inspector: recordsData[i][2],
+        lights: recordsData[i][5] === "✓",
+        computer: recordsData[i][6] === "✓",
+        aircon: recordsData[i][7] === "✓",
+        fan: recordsData[i][8] === "✓",
+        allPassed: String(recordsData[i][9]) === "ผ่านครบ",
+        score: recordsData[i][10],
+      };
+    }
+
+    // All records
+    records.push({
+      date: rowDate,
+      day: recordsData[i][1],
+      inspector: recordsData[i][2],
+      building: recordsData[i][3],
+      room: recordsData[i][4],
+      lights: recordsData[i][5] === "✓",
+      computer: recordsData[i][6] === "✓",
+      aircon: recordsData[i][7] === "✓",
+      fan: recordsData[i][8] === "✓",
+      status: recordsData[i][9],
+      score: recordsData[i][10],
+      timestamp: recordsData[i][11],
+    });
+  }
+
+  // Read Scores sheet
+  var scoresSheet = ss.getSheetByName("Scores");
+  var scoresData = scoresSheet.getDataRange().getValues();
+  var scores = [];
+  for (var j = 1; j < scoresData.length; j++) {
+    scores.push({
+      building: scoresData[j][0],
+      room: scoresData[j][1],
+      totalScore: scoresData[j][2],
+      totalChecks: scoresData[j][3],
+      totalPassed: scoresData[j][4],
+    });
+  }
+  scores.sort(function (a, b) {
+    return b.totalScore - a.totalScore;
+  });
+
+  return jsonResponse({
+    success: true,
+    status: status,
+    records: records,
+    scores: scores,
+  });
 }
 
 // ===== HELPER =====

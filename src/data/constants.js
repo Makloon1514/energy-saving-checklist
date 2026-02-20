@@ -75,7 +75,7 @@ export const INSPECTION_SCHEDULE = [
     dayIndex: 4,
     inspectors: [
       { name: 'พี่นัน (ชาย)', buildingId: 'building-1', buildingName: 'อาคาร 1' },
-      { name: 'น้ำ', buildingId: 'building-3', buildingName: 'อาคาร 3' },
+      { name: 'น้ำหอม', buildingId: 'building-3', buildingName: 'อาคาร 3' },
     ],
   },
   {
@@ -83,7 +83,7 @@ export const INSPECTION_SCHEDULE = [
     dayIndex: 5,
     inspectors: [
       { name: 'ภรณ์', buildingId: 'building-1', buildingName: 'อาคาร 1' },
-      { name: 'น้ำหอม', buildingId: 'building-3', buildingName: 'อาคาร 3' },
+      { name: 'น้ำ', buildingId: 'building-3', buildingName: 'อาคาร 3' },
     ],
   },
 ];

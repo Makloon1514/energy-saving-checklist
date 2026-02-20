@@ -4,6 +4,62 @@
 // ============================================================
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwCBR4GAUHIiEMRR6OkEz2pSQGn25KYwHp7_EW2itQkpcwHW20k0_kMmDdOlPNY6sTV2A/exec';
 
+const CACHE_KEY = 'energy_checklist_cache';
+const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+
+// ===== CACHE HELPERS =====
+function getCachedData(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    if (Date.now() - cached.timestamp > CACHE_TTL) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return cached.data;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedData(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+export function clearCache() {
+  localStorage.removeItem(CACHE_KEY);
+}
+
+// ===== GET ALL DATA (combined, single API call) =====
+export async function getAllData(date) {
+  if (!SCRIPT_URL) {
+    return { success: true, status: {}, records: [], scores: [] };
+  }
+
+  // Check cache first
+  const cacheKey = `${CACHE_KEY}_${date}`;
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const url = `${SCRIPT_URL}?action=getAllData&date=${encodeURIComponent(date)}`;
+    const response = await fetch(url);
+    const result = await response.json();
+    if (result.success) {
+      setCachedData(cacheKey, result);
+    }
+    return result;
+  } catch (error) {
+    console.error('getAllData error:', error);
+    return { success: true, status: {}, records: [], scores: [] };
+  }
+}
+
 // ===== SUBMIT CHECKLIST =====
 export async function submitChecklist(data) {
   if (!SCRIPT_URL) {
@@ -11,6 +67,9 @@ export async function submitChecklist(data) {
   }
 
   try {
+    // Clear cache so Dashboard refreshes after submit
+    clearCache();
+
     const response = await fetch(SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -85,3 +144,4 @@ export async function getTodayStatus(date) {
 export function isConfigured() {
   return SCRIPT_URL !== '';
 }
+
