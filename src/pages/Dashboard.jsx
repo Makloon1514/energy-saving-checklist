@@ -8,7 +8,7 @@ import {
   formatDateThai,
   getThaiDayOfWeek,
 } from '../data/constants';
-import { getRecords, getScores, getTodayStatus } from '../data/api';
+import { getAllData } from '../data/api';
 
 export default function Dashboard() {
   const todayStr = getTodayDateString();
@@ -22,19 +22,17 @@ export default function Dashboard() {
   const [filterDate, setFilterDate] = useState('');
   const [filterBuilding, setFilterBuilding] = useState('');
 
-  // Fetch all data
+  // Fetch all data (Optimized: Single API call)
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
       try {
-        const [statusRes, scoresRes, recordsRes] = await Promise.all([
-          getTodayStatus(todayStr),
-          getScores(),
-          getRecords(),
-        ]);
-        if (statusRes.success) setTodayStatusData(statusRes.status);
-        if (scoresRes.success) setScoresData(scoresRes.scores);
-        if (recordsRes.success) setAllRecords(recordsRes.records);
+        const result = await getAllData(todayStr);
+        if (result.success) {
+          setTodayStatusData(result.status || {});
+          setScoresData(result.scores || []);
+          setAllRecords(result.records || []);
+        }
       } catch (e) {
         console.error('Dashboard fetch error:', e);
       } finally {
